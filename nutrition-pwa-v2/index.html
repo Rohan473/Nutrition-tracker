@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#22301F" />
+<title>Field Log — Nutrition</title>
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<style>
+  :root{
+    --bg:#F7F6F1; --card:#FFFFFF; --line:#E4E1D6; --ink:#22301F;
+    --muted:#8A8775; --green:#3E6B48; --dark:#22301F; --fill:#ECE9DE;
+    --brick:#B85C38; --amber:#C99A2E; --olive:#5C7457;
+  }
+  *{box-sizing:border-box}
+  body{margin:0 auto;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,'Segoe UI',Roboto,sans-serif;
+    max-width:480px;padding-bottom:96px}
+  .mono{font-family:ui-monospace,'SF Mono',Menlo,monospace}
+  h1{font-size:24px;margin:4px 0 0}
+  .header{padding:20px 16px 8px}
+  .eyebrow{font-size:11px;color:var(--muted);letter-spacing:2px}
+  .wrap{padding:8px 16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px}
+  button{border:none;border-radius:12px;padding:14px 18px;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit}
+  button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+  .btn-primary{background:var(--green);color:#fff}
+  .btn-ghost{background:var(--fill);color:var(--ink)}
+  .btn-dark{background:var(--dark);color:#fff}
+  input,textarea,select{width:100%;border-radius:10px;border:1px solid var(--line);padding:12px;font-size:15px;background:#fff;font-family:inherit}
+  .bar{height:6px;border-radius:3px;background:var(--fill);margin:8px 0 16px}
+  .bar>div{height:100%;border-radius:3px;background:var(--green);transition:width .4s}
+  .macrobar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--fill)}
+  .macrolegend{display:flex;justify-content:space-between;margin-top:8px;font-size:12px}
+  .microbar{height:4px;background:var(--fill);border-radius:2px}
+  .microbar>div{height:100%;border-radius:2px}
+  .tag{font-size:10px;border-radius:6px;padding:1px 6px;text-transform:uppercase;letter-spacing:1px;border:1px solid}
+  .tag.low{color:var(--brick);border-color:var(--brick)}
+  .tag.medium{color:var(--amber);border-color:var(--amber)}
+  .tag.high{color:var(--green);border-color:var(--green)}
+  .nav{position:fixed;bottom:0;left:0;right:0;max-width:480px;margin:0 auto;background:var(--card);
+    border-top:1px solid var(--line);display:flex;gap:10px;padding:10px 16px calc(10px + env(safe-area-inset-bottom));z-index:5}
+  .nav button{flex:1}
+  .sheet-bg{position:fixed;inset:0;background:rgba(34,48,31,.5);display:flex;align-items:flex-end;justify-content:center;z-index:10}
+  .sheet{background:var(--bg);border-radius:20px 20px 0 0;padding:20px;width:100%;max-width:480px;max-height:88vh;overflow-y:auto}
+  .err{color:var(--brick);font-size:13px;margin-top:8px}
+  .note{font-size:13px;background:#FBF3E4;border:1px solid #ECDCB8;border-radius:10px;padding:10px;margin:10px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  label{font-size:12px;color:var(--muted);display:block}
+  label input,label select{margin-top:2px}
+  .entry{display:flex;gap:12px}
+  .del{background:none;color:var(--brick);padding:4px;font-size:18px;align-self:flex-start}
+  .chart{display:flex;align-items:flex-end;gap:6px;height:140px}
+  .chart .col{flex:1;text-align:center}
+  .chart .colbar{border-radius:4px 4px 0 0;min-height:2px;background:var(--green)}
+  .chart .over{background:var(--brick)}
+  .hidden{display:none}
+  @media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="eyebrow mono" id="eyebrow">FIELD LOG</div>
+  <h1 id="title">Today's intake</h1>
+</div>
+
+<div id="view-today" class="wrap"></div>
+<div id="view-trends" class="wrap hidden"></div>
+<div id="view-settings" class="wrap hidden"></div>
+<div id="sheet-root"></div>
+
+<div class="nav">
+  <button id="nav-today" class="btn-dark">Today</button>
+  <button id="nav-add" class="btn-primary" aria-label="Log food" style="font-size:20px;line-height:20px">+</button>
+  <button id="nav-trends" class="btn-ghost">Trends</button>
+  <button id="nav-settings" class="btn-ghost" aria-label="Settings">⚙</button>
+</div>
+
+<script>
+"use strict";
+// ============ constants ============
+const MICROS = [
+  {k:"iron_mg",l:"Iron",u:"mg",rda:18},{k:"calcium_mg",l:"Calcium",u:"mg",rda:1000},
+  {k:"potassium_mg",l:"Potassium",u:"mg",rda:3400},{k:"sodium_mg",l:"Sodium",u:"mg",rda:2300},
+  {k:"magnesium_mg",l:"Magnesium",u:"mg",rda:400},{k:"zinc_mg",l:"Zinc",u:"mg",rda:11},
+  {k:"vitamin_c_mg",l:"Vit C",u:"mg",rda:90},{k:"vitamin_d_mcg",l:"Vit D",u:"mcg",rda:15},
+  {k:"vitamin_b12_mcg",l:"Vit B12",u:"mcg",rda:2.4},{k:"folate_mcg",l:"Folate",u:"mcg",rda:400}
+];
+const MACROS = [
+  {k:"protein_g",l:"Protein",c:"var(--brick)"},
+  {k:"carbs_g",l:"Carbs",c:"var(--amber)"},
+  {k:"fat_g",l:"Fat",c:"var(--olive)"}
+];
+const PROVIDERS = {
+  deepseek: {
+    label:"DeepSeek", keyPlaceholder:"sk-...", baseUrl:"https://api.deepseek.com",
+    models:[
+      {id:"deepseek-v4-flash", label:"V4 Flash — cheapest, vision"},
+      {id:"deepseek-v4-pro",   label:"V4 Pro — better, ~10x cost"}
+    ]
+  },
+  anthropic: {
+    label:"Anthropic (Claude)", keyPlaceholder:"sk-ant-...", baseUrl:"https://api.anthropic.com",
+    models:[
+      {id:"claude-haiku-4-5-20251001", label:"Haiku 4.5 — cheap"},
+      {id:"claude-sonnet-4-6",         label:"Sonnet 4.6 — better, 3–4x cost"}
+    ]
+  }
+};
+const DEFAULTS = {provider:"deepseek", keys:{deepseek:"",anthropic:""},
+  model:"deepseek-v4-flash", baseUrlOverride:"",
+  targets:{calories:2200,protein_g:110,carbs_g:260,fat_g:70}};
+
+const todayKey = () => {
+  const d = new Date();
+  return new Date(d.getTime() - d.getTimezoneOffset()*60000).toISOString().slice(0,10);
+};
+
+// ============ database (IndexedDB) ============
+const DB = (() => {
+  let dbp = null;
+  function open(){
+    if(dbp) return dbp;
+    dbp = new Promise((resolve,reject)=>{
+      const req = indexedDB.open("fieldlog", 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if(!db.objectStoreNames.contains("days"))
+          db.createObjectStore("days", {keyPath:"date"});
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror   = () => reject(req.error);
+    });
+    return dbp;
+  }
+  function tx(mode, fn){
+    return open().then(db => new Promise((resolve,reject)=>{
+      const t = db.transaction("days", mode);
+      const s = t.objectStore("days");
+      const out = fn(s);
+      t.oncomplete = () => resolve(out && out.result !== undefined ? out.result : undefined);
+      t.onerror = () => reject(t.error);
+    }));
+  }
+  return {
+    async getDay(date){
+      const r = await tx("readonly", s => s.get(date));
+      return r ? r.entries : [];
+    },
+    putDay(date, entries){ return tx("readwrite", s => s.put({date, entries})); },
+    async allDays(){
+      const r = await tx("readonly", s => s.getAll());
+      return (r || []).sort((a,b)=>a.date<b.date?-1:1);
+    }
+  };
+})();
+
+// one-time migration from the old localStorage layout
+async function migrateFromLocalStorage(){
+  const old = [];
+  for(let i=0;i<localStorage.length;i++){
+    const key = localStorage.key(i);
+    if(key && key.startsWith("nt:day:")) old.push(key);
+  }
+  for(const key of old){
+    try{
+      const date = key.slice(7);
+      const existing = await DB.getDay(date);
+      if(existing.length === 0){
+        const entries = JSON.parse(localStorage.getItem(key)) || [];
+        if(entries.length) await DB.putDay(date, entries);
+      }
+      localStorage.removeItem(key);
+    }catch(e){ /* leave the key in place if anything fails */ }
+  }
+}
+
+// settings stay in localStorage (small, needed synchronously at boot)
+const settings = {
+  get(){
+    try{
+      const s = JSON.parse(localStorage.getItem("nt:settings")||"{}");
+      return {...DEFAULTS, ...s, keys:{...DEFAULTS.keys, ...(s.keys||{})},
+              targets:{...DEFAULTS.targets, ...(s.targets||{})}};
+    }catch{ return JSON.parse(JSON.stringify(DEFAULTS)); }
+  },
+  save(s){ localStorage.setItem("nt:settings", JSON.stringify(s)); }
+};
+
+// ============ image ============
+function resizeToBase64(file){
+  return new Promise((resolve,reject)=>{
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = ()=>{
+      const max=1024; let w=img.width,h=img.height;
+      if(Math.max(w,h)>max){const s=max/Math.max(w,h);w=Math.round(w*s);h=Math.round(h*s);}
+      const c=document.createElement("canvas");c.width=w;c.height=h;
+      c.getContext("2d").drawImage(img,0,0,w,h);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL("image/jpeg",0.85).split(",")[1]);
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error("read failed"));};
+    img.src=url;
+  });
+}
+
+// ============ AI ============
+const PROMPT = `You are a careful nutrition analyst. Estimate the nutritional content of the food or drink described or shown. The food may be an Indian home-cooked dish — account for typical preparation (oil, ghee, portion norms) when relevant.
+
+Respond with ONLY a JSON object, no markdown fences, no preamble:
+{"name":"short dish name","portion":"estimated portion e.g. 1 bowl (~250g)","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0,"fiber_g":0,"micros":{"iron_mg":0,"calcium_mg":0,"potassium_mg":0,"sodium_mg":0,"magnesium_mg":0,"zinc_mg":0,"vitamin_c_mg":0,"vitamin_d_mcg":0,"vitamin_b12_mcg":0,"folate_mcg":0},"confidence":"low|medium|high","notes":"one sentence on biggest uncertainty"}
+Use 0 for negligible micros. Be honest: photos without scale references are "low" or "medium" confidence.`;
+
+function parseJsonReply(text){
+  const parsed = JSON.parse(text.replace(/```json|```/g,"").trim());
+  if(typeof parsed.calories!=="number") throw new Error("BAD_SHAPE");
+  return parsed;
+}
+
+async function analyze({imageB64, description}){
+  const s = settings.get();
+  const key = s.keys[s.provider];
+  if(!key) throw new Error("NO_KEY");
+  const base = (s.baseUrlOverride || PROVIDERS[s.provider].baseUrl).replace(/\/$/,"");
+  const userText = PROMPT + (description ? "\n\nUser description: "+description : "\n\nNo description — analyze the image.");
+
+  if(s.provider === "anthropic"){
+    const content = [];
+    if(imageB64) content.push({type:"image",source:{type:"base64",media_type:"image/jpeg",data:imageB64}});
+    content.push({type:"text",text:userText});
+    const res = await fetch(base+"/v1/messages",{
+      method:"POST",
+      headers:{
+        "content-type":"application/json",
+        "x-api-key":key,
+        "anthropic-version":"2023-06-01",
+        "anthropic-dangerous-direct-browser-access":"true"
+      },
+      body:JSON.stringify({model:s.model,max_tokens:1000,messages:[{role:"user",content}]})
+    });
+    if(res.status===401) throw new Error("BAD_KEY");
+    if(!res.ok) throw new Error("API_"+res.status);
+    const data = await res.json();
+    return parseJsonReply((data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("\n"));
+  }
+
+  // DeepSeek — OpenAI-compatible format
+  const content = [];
+  if(imageB64) content.push({type:"image_url",image_url:{url:"data:image/jpeg;base64,"+imageB64}});
+  content.push({type:"text",text:userText});
+  const res = await fetch(base+"/chat/completions",{
+    method:"POST",
+    headers:{
+      "content-type":"application/json",
+      "authorization":"Bearer "+key
+    },
+    body:JSON.stringify({model:s.model,max_tokens:1000,messages:[{role:"user",content}]})
+  }).catch(()=>{ throw new Error("CORS_OR_NETWORK"); });
+  if(res.status===401) throw new Error("BAD_KEY");
+  if(!res.ok) throw new Error("API_"+res.status);
+  const data = await res.json();
+  return parseJsonReply((data.choices && data.choices[0] && data.choices[0].message.content) || "");
+}
+
+// ============ state ============
+let entries = [];
+let view = "today";
+let draft = null, photoB64 = null, analyzing = false, addErr = "";
+
+function totals(){
+  const t = {calories:0,protein_g:0,carbs_g:0,fat_g:0,fiber_g:0,
+    micros:Object.fromEntries(MICROS.map(m=>[m.k,0]))};
+  for(const e of entries){
+    t.calories+=e.calories||0; t.fiber_g+=e.fiber_g||0;
+    for(const m of MACROS) t[m.k]+=e[m.k]||0;
+    for(const m of MICROS) t.micros[m.k]+=(e.micros&&e.micros[m.k])||0;
+  }
+  return t;
+}
+
+// ============ render: today ============
+const esc = s => String(s??"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+function renderToday(){
+  const t = totals(), tg = settings.get().targets;
+  const calPct = Math.min(100,(t.calories/tg.calories)*100);
+  const gsum = MACROS.reduce((a,m)=>a+Math.max(0,t[m.k]),0)||1;
+  let html = `<div class="card">
+    <div style="display:flex;align-items:baseline;gap:8px">
+      <span class="mono" style="font-size:36px">${Math.round(t.calories)}</span>
+      <span class="mono" style="font-size:13px;color:var(--muted)">/ ${tg.calories} kcal</span>
+    </div>
+    <div class="bar"><div style="width:${calPct}%;${calPct>=100?'background:var(--brick)':''}"></div></div>
+    <div class="macrobar">${MACROS.map(m=>`<div style="width:${(Math.max(0,t[m.k])/gsum)*100}%;background:${m.c}"></div>`).join("")}</div>
+    <div class="macrolegend mono">${MACROS.map(m=>`<span><span style="color:${m.c}">●</span> ${m.l} ${Math.round(t[m.k])}<span style="color:var(--muted)">/${tg[m.k]}g</span></span>`).join("")}</div>
+    <div class="mono" style="font-size:12px;color:var(--muted);margin-top:10px">Fiber ${Math.round(t.fiber_g)}g</div>
+  </div>`;
+
+  html += `<div class="card"><div style="font-weight:600;font-size:14px;margin-bottom:10px">Micronutrients vs daily reference</div>`;
+  for(const m of MICROS){
+    const v=t.micros[m.k], pct=Math.min(100,(v/m.rda)*100);
+    html += `<div style="margin-bottom:8px">
+      <div class="mono" style="display:flex;justify-content:space-between;font-size:12px">
+        <span>${m.l}</span><span style="color:var(--muted)">${v.toFixed(v<10?1:0)}/${m.rda}${m.u}</span></div>
+      <div class="microbar"><div style="width:${pct}%;background:${pct>=80?'var(--green)':'var(--amber)'}"></div></div></div>`;
+  }
+  html += `<div style="font-size:11px;color:var(--muted);margin-top:8px">Micro estimates from photos are rough — directional, not clinical.</div></div>`;
+
+  if(entries.length===0){
+    html += `<div class="card" style="text-align:center;color:var(--muted);font-size:14px">Nothing logged yet. Tap + to add your first meal.</div>`;
+  } else {
+    for(const e of entries){
+      html += `<div class="card entry">
+        <div style="flex:1">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <span style="font-weight:600;font-size:15px">${esc(e.name)}</span>
+            <span class="tag ${esc(e.confidence)} mono">${esc(e.confidence)}</span>
+          </div>
+          <div class="mono" style="font-size:12px;color:var(--muted);margin-top:2px">${esc(e.time)} · ${esc(e.portion)}</div>
+          <div class="mono" style="font-size:13px;margin-top:6px">${Math.round(e.calories)} kcal · P${Math.round(e.protein_g)} C${Math.round(e.carbs_g)} F${Math.round(e.fat_g)}</div>
+        </div>
+        <button class="del" data-del="${e.id}" aria-label="Delete ${esc(e.name)}">×</button>
+      </div>`;
+    }
+  }
+  const el = document.getElementById("view-today");
+  el.innerHTML = html;
+  el.querySelectorAll("[data-del]").forEach(b=>b.onclick=async ()=>{
+    entries = entries.filter(e=>String(e.id)!==b.dataset.del);
+    await DB.putDay(todayKey(), entries);
+    renderToday();
+  });
+}
+
+// ============ render: trends ============
+async function renderTrends(){
+  const el = document.getElementById("view-trends");
+  el.innerHTML = `<div class="mono" style="font-size:13px;padding:8px">loading…</div>`;
+  const tg = settings.get().targets;
+  const all = await DB.allDays();
+  const days = all.slice(-7).map(d=>({date:d.date,
+    calories:d.entries.reduce((a,e)=>a+(e.calories||0),0),
+    protein:d.entries.reduce((a,e)=>a+(e.protein_g||0),0)}));
+  let html = "";
+  if(days.length===0){
+    html = `<div class="card" style="color:var(--muted)">No history yet. Log a few days and trends appear here.</div>`;
+  } else {
+    const max = Math.max(...days.map(d=>d.calories), tg.calories);
+    html = `<div class="card"><div style="font-weight:600;font-size:14px;margin-bottom:12px">Calories per day</div>
+      <div class="chart">${days.map(d=>`
+        <div class="col">
+          <div class="mono" style="font-size:10px;color:var(--muted)">${Math.round(d.calories)}</div>
+          <div class="colbar ${d.calories>tg.calories?'over':''}" style="height:${(d.calories/max)*100}px"></div>
+          <div class="mono" style="font-size:10px;margin-top:4px">${d.date.slice(5)}</div>
+        </div>`).join("")}</div>
+      <div class="mono" style="font-size:12px;color:var(--muted);margin-top:12px">
+        Protein avg: ${Math.round(days.reduce((a,d)=>a+d.protein,0)/days.length)}g/day · target ${tg.calories} kcal</div>
+    </div>
+    <button class="btn-ghost" id="export-btn" style="width:100%">Export all data (JSON)</button>`;
+  }
+  el.innerHTML = html;
+  const ex = document.getElementById("export-btn");
+  if(ex) ex.onclick = async ()=>{
+    const all2 = await DB.allDays();
+    const out = Object.fromEntries(all2.map(d=>[d.date, d.entries]));
+    const blob = new Blob([JSON.stringify(out,null,2)],{type:"application/json"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "nutrition-log-"+todayKey()+".json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+}
+
+// ============ render: settings ============
+function renderSettings(){
+  const s = settings.get();
+  const p = PROVIDERS[s.provider];
+  document.getElementById("view-settings").innerHTML = `
+    <div class="card">
+      <div style="font-weight:600;margin-bottom:10px">AI provider</div>
+      <label>Provider
+        <select id="set-provider">
+          ${Object.entries(PROVIDERS).map(([id,pp])=>`<option value="${id}" ${s.provider===id?"selected":""}>${pp.label}</option>`).join("")}
+        </select></label>
+      <div style="margin-top:10px"><label>API key (${p.label})
+        <input id="set-key" type="password" placeholder="${p.keyPlaceholder}" value="${esc(s.keys[s.provider])}" autocomplete="off"/></label></div>
+      <div style="font-size:12px;color:var(--muted);margin-top:6px">Stored only on this device — never in the repo, never sent anywhere except the provider's API. Set a low monthly spend limit on the key.</div>
+      <div style="margin-top:12px"><label>Model
+        <select id="set-model">
+          ${p.models.map(m=>`<option value="${m.id}" ${s.model===m.id?"selected":""}>${m.label}</option>`).join("")}
+        </select></label></div>
+      <div style="margin-top:12px"><label>Base URL override (optional — for a CORS proxy)
+        <input id="set-baseurl" type="text" placeholder="${p.baseUrl}" value="${esc(s.baseUrlOverride)}" autocomplete="off"/></label></div>
+    </div>
+    <div class="card">
+      <div style="font-weight:600;margin-bottom:10px">Daily targets</div>
+      <div class="grid2">
+        <label>Calories<input id="tg-cal" type="number" value="${s.targets.calories}"/></label>
+        <label>Protein g<input id="tg-pro" type="number" value="${s.targets.protein_g}"/></label>
+        <label>Carbs g<input id="tg-carb" type="number" value="${s.targets.carbs_g}"/></label>
+        <label>Fat g<input id="tg-fat" type="number" value="${s.targets.fat_g}"/></label>
+      </div>
+    </div>
+    <button class="btn-primary" id="save-settings" style="width:100%">Save settings</button>
+    <div id="settings-msg" style="font-size:13px;color:var(--green);margin-top:8px"></div>`;
+
+  document.getElementById("set-provider").onchange = (e)=>{
+    const cur = settings.get();
+    cur.keys[cur.provider] = document.getElementById("set-key").value.trim(); // keep what was typed
+    cur.provider = e.target.value;
+    cur.model = PROVIDERS[cur.provider].models[0].id;
+    settings.save(cur);
+    renderSettings();
+  };
+  document.getElementById("save-settings").onclick = ()=>{
+    const cur = settings.get();
+    cur.provider = document.getElementById("set-provider").value;
+    cur.keys[cur.provider] = document.getElementById("set-key").value.trim();
+    cur.model = document.getElementById("set-model").value;
+    cur.baseUrlOverride = document.getElementById("set-baseurl").value.trim();
+    cur.targets = {
+      calories:+document.getElementById("tg-cal").value||2200,
+      protein_g:+document.getElementById("tg-pro").value||110,
+      carbs_g:+document.getElementById("tg-carb").value||260,
+      fat_g:+document.getElementById("tg-fat").value||70
+    };
+    settings.save(cur);
+    document.getElementById("settings-msg").textContent = "Saved.";
+    setTimeout(()=>{const m=document.getElementById("settings-msg");if(m)m.textContent="";},2000);
+  };
+}
+
+// ============ add sheet ============
+function renderSheet(){
+  const root = document.getElementById("sheet-root");
+  if(!root.dataset.open){ root.innerHTML=""; return; }
+  let inner;
+  if(!draft){
+    inner = `
+      <div style="font-weight:700;font-size:18px;margin-bottom:12px">Log food or drink</div>
+      <input id="photo-input" type="file" accept="image/*" capture="environment" style="display:none"/>
+      <button id="photo-btn" style="width:100%;margin-bottom:10px;${photoB64?'background:var(--green);color:#fff':'background:#fff;border:1px solid var(--line);color:var(--ink)'}">
+        ${photoB64?"✓ Photo attached — tap to retake":"📷 Take or choose photo"}</button>
+      <textarea id="desc-input" rows="3" placeholder="Optional: describe it — '2 rotis, dal, half bowl rice'. Description improves accuracy a lot."></textarea>
+      ${addErr?`<div class="err">${esc(addErr)}</div>`:""}
+      <div style="display:flex;gap:10px;margin-top:14px">
+        <button id="cancel-btn" class="btn-ghost" style="flex:1">Cancel</button>
+        <button id="analyze-btn" class="btn-primary" style="flex:2" ${analyzing?"disabled":""}>${analyzing?"Analyzing…":"Analyze"}</button>
+      </div>`;
+  } else {
+    inner = `
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <div style="font-weight:700;font-size:18px">${esc(draft.name)}</div>
+        <span class="tag ${esc(draft.confidence)} mono">${esc(draft.confidence)}</span>
+      </div>
+      <div class="mono" style="font-size:12px;color:var(--muted);margin:4px 0 8px">${esc(draft.portion)}</div>
+      ${draft.notes?`<div class="note">⚠ ${esc(draft.notes)}</div>`:""}
+      <div style="font-size:13px;color:var(--muted);margin-bottom:6px">Estimates are editable — correct anything you know better:</div>
+      <div class="grid2">
+        ${[["calories","kcal"],["protein_g","protein g"],["carbs_g","carbs g"],["fat_g","fat g"],["fiber_g","fiber g"]]
+          .map(([k,l])=>`<label>${l}<input class="mono" data-field="${k}" type="number" value="${Math.round((draft[k]||0)*10)/10}"/></label>`).join("")}
+      </div>
+      ${addErr?`<div class="err">${esc(addErr)}</div>`:""}
+      <div style="display:flex;gap:10px;margin-top:16px">
+        <button id="back-btn" class="btn-ghost" style="flex:1">Back</button>
+        <button id="save-btn" class="btn-primary" style="flex:2">Save to log</button>
+      </div>`;
+  }
+  root.innerHTML = `<div class="sheet-bg"><div class="sheet">${inner}</div></div>`;
+
+  const pi = document.getElementById("photo-input");
+  const pb = document.getElementById("photo-btn");
+  if(pb){ pb.onclick=()=>pi.click();
+    pi.onchange = async e=>{
+      const f = e.target.files && e.target.files[0];
+      if(!f) return;
+      addErr="";
+      try{ photoB64 = await resizeToBase64(f); }catch{ addErr="Couldn't read that photo."; }
+      renderSheet();
+    };
+  }
+  const cb = document.getElementById("cancel-btn");
+  if(cb) cb.onclick = closeSheet;
+  const ab = document.getElementById("analyze-btn");
+  if(ab) ab.onclick = async ()=>{
+    const description = document.getElementById("desc-input").value.trim();
+    if(!photoB64 && !description){ addErr="Add a photo or describe the food first."; renderSheet(); return; }
+    analyzing = true; addErr=""; renderSheet();
+    try{
+      const r = await analyze({imageB64:photoB64, description:description||null});
+      draft = {...r, time:new Date().toTimeString().slice(0,5)};
+    }catch(err){
+      const map = {
+        NO_KEY:"No API key set. Add one in Settings (⚙) first.",
+        BAD_KEY:"API key rejected. Check it in Settings.",
+        CORS_OR_NETWORK:"Request blocked — likely CORS. The provider may not allow direct browser calls; set a proxy in Settings → Base URL override (see README)."
+      };
+      addErr = map[err.message] || "Analysis failed ("+err.message+"). Check connection and retry.";
+    }
+    analyzing = false; renderSheet();
+  };
+  const bb = document.getElementById("back-btn");
+  if(bb) bb.onclick = ()=>{ draft=null; renderSheet(); };
+  const sb = document.getElementById("save-btn");
+  if(sb) sb.onclick = async ()=>{
+    document.querySelectorAll("[data-field]").forEach(inp=>{ draft[inp.dataset.field] = parseFloat(inp.value)||0; });
+    entries.push({...draft, id:Date.now()});
+    await DB.putDay(todayKey(), entries);
+    closeSheet(); renderToday();
+  };
+}
+function openSheet(){ const r=document.getElementById("sheet-root"); r.dataset.open="1"; draft=null; photoB64=null; addErr=""; renderSheet(); }
+function closeSheet(){ const r=document.getElementById("sheet-root"); delete r.dataset.open; draft=null; photoB64=null; addErr=""; renderSheet(); }
+
+// ============ nav ============
+function show(v){
+  view=v;
+  for(const x of ["today","trends","settings"]){
+    document.getElementById("view-"+x).classList.toggle("hidden", x!==v);
+    const nb = document.getElementById("nav-"+x);
+    if(nb){ nb.className = x===v ? "btn-dark" : "btn-ghost"; }
+  }
+  document.getElementById("title").textContent =
+    v==="today"?"Today's intake":v==="trends"?"Last 7 days":"Settings";
+  if(v==="today") renderToday();
+  if(v==="trends") renderTrends();
+  if(v==="settings") renderSettings();
+}
+document.getElementById("nav-today").onclick=()=>show("today");
+document.getElementById("nav-trends").onclick=()=>show("trends");
+document.getElementById("nav-settings").onclick=()=>show("settings");
+document.getElementById("nav-add").onclick=openSheet;
+
+// ============ boot ============
+(async ()=>{
+  document.getElementById("eyebrow").textContent = "FIELD LOG · " + todayKey();
+  await migrateFromLocalStorage();
+  entries = await DB.getDay(todayKey());
+  show("today");
+  const s = settings.get();
+  if(!s.keys[s.provider]) show("settings");
+})();
+
+if("serviceWorker" in navigator){
+  navigator.serviceWorker.register("sw.js").catch(()=>{});
+}
+</script>
+</body>
+</html>
